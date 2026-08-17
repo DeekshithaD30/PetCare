@@ -46,9 +46,148 @@ const demo = {
   notifications: []
 };
 
-let state = loadState();
+const SESSION_KEY = "petcare-session-v1";
+const ACCOUNTS_KEY = "petcare-accounts-v1";
+let sessionUserId = localStorage.getItem(SESSION_KEY);
+let state = sessionUserId ? loadAccountState(sessionUserId) : null;
 let currentView = "dashboard";
-let currentPetId = state.pets[0]?.id || null;
+let currentPetId = state?.pets?.[0]?.id || null;
+
+function getAccounts() {
+  try { return JSON.parse(localStorage.getItem(ACCOUNTS_KEY) || "{}"); }
+  catch { return {}; }
+}
+function saveAccounts(accounts) {
+  localStorage.setItem(ACCOUNTS_KEY, JSON.stringify(accounts));
+}
+function loadAccountState(userId) {
+  const accounts = getAccounts();
+  return accounts[userId]?.data || null;
+}
+function saveAccountState() {
+  if (!sessionUserId || !state) return;
+  const accounts = getAccounts();
+  if (!accounts[sessionUserId]) return;
+  accounts[sessionUserId].data = state;
+  saveAccounts(accounts);
+}
+async function hashPassword(password) {
+  if (window.crypto?.subtle) {
+    const data = new TextEncoder().encode(password);
+    const buffer = await crypto.subtle.digest("SHA-256", data);
+    return Array.from(new Uint8Array(buffer)).map(b=>b.toString(16).padStart(2,"0")).join("");
+  }
+  return btoa(unescape(encodeURIComponent(password)));
+}
+function emailKey(email) { return email.trim().toLowerCase(); }
+function isAdmin() {
+  const account = getAccounts()[sessionUserId];
+  return !!account && account.role === "admin";
+}
+function ensureAdminAccount() {
+  const accounts = getAccounts();
+  if (!accounts["admin-local"]) {
+    accounts["admin-local"] = {
+      id: "admin-local",
+      name: "PetCare Admin",
+      email: "admin@petcare.local",
+      passwordHash: "admin123",
+      role: "admin",
+      data: {
+        user: {name: "PetCare Admin", email: "admin@petcare.local"},
+        pets: [], health: [], schedules: [], incidents: [], weights: [], documents: [], community: [], notifications: []
+      }
+    };
+  } else {
+    accounts["admin-local"].role = "admin";
+    accounts["admin-local"].email = "admin@petcare.local";
+    accounts["admin-local"].name = "PetCare Admin";
+  }
+  saveAccounts(accounts);
+}
+
+function showAuth(mode="login") {
+  document.getElementById("landing").classList.add("hidden");
+  document.getElementById("app").classList.add("hidden");
+  document.getElementById("auth").classList.remove("hidden");
+  switchAuthTab(mode);
+}
+function switchAuthTab(mode) {
+  const login = mode === "login";
+  document.getElementById("login-form").classList.toggle("hidden", !login);
+  document.getElementById("signup-form").classList.toggle("hidden", login);
+  document.querySelectorAll(".auth-tab").forEach(b=>b.classList.toggle("active", b.dataset.authTab === mode));
+  document.getElementById("auth-title").textContent = login ? "Welcome back." : "Create your account.";
+  document.getElementById("auth-subtitle").textContent = login ? "Sign in to continue to your pet's records." : "Create a private local profile for your pets.";
+  document.getElementById("login-error").textContent = "";
+  document.getElementById("signup-error").textContent = "";
+}
+function startSession(userId) {
+  const accounts = getAccounts();
+  const account = accounts[userId];
+
+  if (!account) {
+    console.error("PetCare: account not found", userId);
+    return;
+  }
+
+  sessionUserId = userId;
+  localStorage.setItem(SESSION_KEY, userId);
+  state = loadAccountState(userId);
+
+  if (!state) {
+    state = structuredClone(account.role === "admin" ? {
+      user: {name: account.name, email: account.email},
+      pets: [], health: [], schedules: [], incidents: [], weights: [], documents: [], community: [], notifications: []
+    } : demo);
+
+    state.user = {
+      ...(state.user || {}),
+      name: account.name,
+      email: account.email
+    };
+
+    saveAccountState();
+  } else {
+    state.user = {
+      ...(state.user || {}),
+      name: account.name,
+      email: account.email
+    };
+    saveAccountState();
+  }
+
+  currentPetId = state.pets?.[0]?.id || null;
+  setView("dashboard");
+}
+function createDemoAccount() {
+  const accounts = getAccounts();
+  const id = "demo-goku";
+  if (!accounts[id]) {
+    accounts[id] = {
+      id,
+      name: "Demo Owner",
+      email: "demo@petcare.local",
+      passwordHash: "demo",
+      role: "user",
+      data: structuredClone(demo)
+    };
+    saveAccounts(accounts);
+  }
+  startSession(id);
+}
+function logout() {
+  localStorage.removeItem(SESSION_KEY);
+  sessionUserId = null;
+  state = null;
+  currentPetId = null;
+  currentView = "dashboard";
+  document.getElementById("app").classList.add("hidden");
+  document.getElementById("auth").classList.add("hidden");
+  document.getElementById("landing").classList.remove("hidden");
+  document.querySelector(".sidebar")?.classList.remove("open");
+  showToast("You have been logged out");
+}
 
 function loadState() {
   try {
@@ -56,7 +195,10 @@ function loadState() {
     return saved ? JSON.parse(saved) : structuredClone(demo);
   } catch { return structuredClone(demo); }
 }
-function save() { localStorage.setItem(KEY, JSON.stringify(state)); }
+function save() {
+  if (sessionUserId) saveAccountState();
+  else localStorage.setItem(KEY, JSON.stringify(state));
+}
 function esc(v="") {
   return String(v).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#039;'}[c]));
 }
@@ -103,20 +245,34 @@ function showToast(msg) {
   setTimeout(()=>el.remove(),2600);
 }
 function setView(view) {
+  if (!state || !sessionUserId) { showAuth("login"); return; }
   currentView = view;
   document.getElementById("landing").classList.add("hidden");
+  document.getElementById("auth").classList.add("hidden");
   document.getElementById("app").classList.remove("hidden");
   renderShell();
 }
 function enterApp(demoMode=true) {
-  if (demoMode && !localStorage.getItem(KEY)) { state=structuredClone(demo); save(); }
-  currentPetId = state.pets[0]?.id || null;
-  setView("dashboard");
+  if (sessionUserId && state) {
+    currentPetId = state.pets[0]?.id || null;
+    setView("dashboard");
+  } else {
+    showAuth("login");
+  }
 }
 function renderShell() {
   renderPetSwitcher();
+  const userNameEl = document.getElementById("user-name");
+  const userAvatarEl = document.getElementById("user-avatar");
+  if (userNameEl) userNameEl.textContent = state?.user?.name || getAccounts()[sessionUserId]?.name || "Pet Owner";
+  if (userAvatarEl) {
+    const n = state?.user?.name || getAccounts()[sessionUserId]?.name || "P";
+    userAvatarEl.textContent = n.slice(0,1).toUpperCase();
+  }
+  const adminNav = document.getElementById("admin-nav");
+  if (adminNav) adminNav.classList.toggle("hidden", !isAdmin());
   document.querySelectorAll(".nav-item[data-view]").forEach(b=>b.classList.toggle("active",b.dataset.view===currentView));
-  const titles={dashboard:"Dashboard",pets:"My pets",health:"Health records",care:"Care & reminders",incidents:"Incidents",timeline:"Timeline",documents:"Documents",community:"Community"};
+  const titles={dashboard:"Dashboard",pets:"My pets",health:"Health records",care:"Care & reminders",incidents:"Incidents",timeline:"Timeline",documents:"Documents",community:"Community",admin:"Admin panel"};
   document.getElementById("header-title").textContent=titles[currentView] || "PetCare";
   const count = petSchedules().filter(s => { const n=daysUntil(s.next); return n !== null && n <= 30; }).length;
   document.getElementById("notification-count").textContent=count;
@@ -138,6 +294,7 @@ function renderView() {
   if(currentView==="timeline") root.innerHTML=timelineHTML();
   if(currentView==="documents") root.innerHTML=documentsHTML();
   if(currentView==="community") root.innerHTML=communityHTML();
+  if(currentView==="admin") root.innerHTML=adminHTML();
   bindViewEvents();
 }
 function pageHead(title,sub,actionText="",action="") {
@@ -150,7 +307,7 @@ function dashboardHTML() {
     <div class="profile-summary panel" style="margin-bottom:15px">
       <div class="profile-photo">${p.photo?`<img src="${p.photo}" alt="${esc(p.name)}">`:`<span class="initial">${esc(p.name.slice(0,1))}</span>`}</div>
       <div style="flex:1"><h2>${esc(p.name)}</h2><p>${esc(p.breed||p.species)} · ${esc(p.sex)} · ${ageOf(p.dob)}</p><span class="tag">${esc(p.about||"Pet health passport")}</span></div>
-      <button class="btn btn-light btn-sm" data-view="pets">View profile</button>
+      <div style="display:flex;gap:7px;flex-wrap:wrap"><button class="btn btn-light btn-sm" data-view="pets">View pets</button><button class="btn btn-dark btn-sm" data-action="add-pet">Add pet</button></div>
     </div>
     <div class="grid-4">
       <div class="stat-card"><div class="stat-label">UPCOMING CARE</div><div class="stat-value">${soon.length}</div><div class="stat-note">Within 30 days</div></div>
@@ -189,13 +346,25 @@ function weightChart(weights) {
 }
 function petsHTML() {
   return `${pageHead("My pets","Manage your pets and keep each health passport separate.","Add pet","add-pet")}
-    <div class="pet-grid">${state.pets.map(p=>`<article class="pet-card"><div class="pet-card-cover">${p.photo?`<img src="${p.photo}" alt="${esc(p.name)}">`:`<span class="initial">${esc(p.name.slice(0,1))}</span>`}</div><div class="pet-card-body"><h3>${esc(p.name)}</h3><p>${esc(p.breed||p.species)} · ${ageOf(p.dob)}</p><div class="pet-card-meta"><div><span>Weight</span><strong>${p.weight||0} kg</strong></div><div><span>Records</span><strong>${state.health.filter(x=>x.petId===p.id).length}</strong></div><div><span>Incidents</span><strong>${state.incidents.filter(x=>x.petId===p.id).length}</strong></div></div><div style="margin-top:15px"><button class="btn btn-dark btn-sm" data-action="select-pet" data-id="${p.id}">Open passport</button></div></div></article>`).join("")}</div>`;
+    <div class="pet-grid">${state.pets.map(p=>`<article class="pet-card"><div class="pet-card-cover">${p.photo?`<img src="${p.photo}" alt="${esc(p.name)}">`:`<span class="initial">${esc(p.name.slice(0,1))}</span>`}</div><div class="pet-card-body"><h3>${esc(p.name)}</h3><p>${esc(p.breed||p.species)} · ${ageOf(p.dob)}</p><div class="pet-card-meta"><div><span>Weight</span><strong>${p.weight||0} kg</strong></div><div><span>Records</span><strong>${state.health.filter(x=>x.petId===p.id).length}</strong></div><div><span>Incidents</span><strong>${state.incidents.filter(x=>x.petId===p.id).length}</strong></div></div><div style="margin-top:15px;display:flex;gap:7px;flex-wrap:wrap">
+<button class="btn btn-dark btn-sm" data-action="select-pet" data-id="${p.id}">Open passport</button>
+<button class="btn btn-light btn-sm" data-action="edit-pet" data-id="${p.id}">Edit</button>
+<button class="btn btn-light btn-sm" data-action="delete-pet" data-id="${p.id}">Delete</button>
+</div></div></article>`).join("")}</div>`;
 }
 function healthHTML() {
   const rows=petHealth().sort((a,b)=>b.date.localeCompare(a.date)), p=pet();
   return `${pageHead(`${esc(p.name)}'s health records`,"Vaccinations, treatments, visits and other important health information.","Add record","add-record")}
     <div class="record-list">${rows.length?rows.map(r=>`<article class="record-card"><div class="record-icon">${iconFor(r.type)}</div><div><h3>${esc(r.title)}</h3><p>${esc(r.type)} · ${formatDate(r.date)}${r.vet?` · ${esc(r.vet)}`:""}</p><p>${esc(r.notes||"No notes")}</p></div><time>${r.next?`Next: ${formatDate(r.next)}`:""}</time></article>`).join(""):`<div class="empty">No health records yet.</div>`}</div>
-    <section class="panel" style="margin-top:15px"><div class="panel-head"><h2>Weight history</h2><button class="btn btn-light btn-sm" data-action="add-weight">Add measurement</button></div>${weightChart(petWeights())}</section>`;
+    <section class="panel" style="margin-top:15px">
+      <div class="panel-head"><h2>Weight history</h2><button class="btn btn-light btn-sm" data-action="add-weight">Add measurement</button></div>
+      ${weightChart(petWeights())}
+      ${petWeights().length ? `<div class="care-list" style="margin-top:15px">${petWeights().slice().reverse().map(w => {
+        const uploadLabel = w.fileName ? `Uploaded: ${esc(w.fileName)}` : "Manual";
+        const noteLabel = w.notes ? ` · ${esc(w.notes)}` : "";
+        return `<div class="care-row"><div class="care-main"><div class="care-icon">kg</div><div><strong>${w.weight} kg</strong><span>${formatDate(w.date)}${noteLabel}</span></div></div><span class="due-badge">${uploadLabel}</span></div>`;
+      }).join("")}</div>` : ""}
+    </section>`;
 }
 function careHTML() {
   const rows=petSchedules().sort((a,b)=>a.next.localeCompare(b.next));
@@ -222,6 +391,79 @@ function documentsHTML() {
     <div class="doc-grid">${docs.length?docs.map(d=>`<article class="doc-card"><div class="doc-icon">${esc(d.type||"FILE")}</div><h3>${esc(d.name)}</h3><p>${formatDate(d.date)} · ${esc(d.size||"Stored locally")}</p></article>`).join(""):`<div class="empty">No documents uploaded yet.</div>`}</div>
     <div class="panel" style="margin-top:15px"><p style="color:var(--muted);font-size:11px;margin:0">This free GitHub Pages version stores selected document data in the browser. Do not use it as a secure medical-record repository until a private backend and encrypted storage are added.</p></div>`;
 }
+
+function adminResetUser(userId) {
+  if (!isAdmin()) return;
+  const accounts = getAccounts();
+  const account = accounts[userId];
+  if (!account || account.role === "admin") return;
+  if (!confirm(`Reset all pet data for ${account.name}? This cannot be undone.`)) return;
+  account.data = {
+    user: {name: account.name, email: account.email},
+    pets: [], health: [], schedules: [], incidents: [], weights: [], documents: [], community: [], notifications: []
+  };
+  accounts[userId] = account;
+  saveAccounts(accounts);
+  renderShell();
+  showToast(`${account.name}'s data was reset`);
+}
+
+function adminDeleteUser(userId) {
+  if (!isAdmin()) return;
+  const accounts = getAccounts();
+  const account = accounts[userId];
+  if (!account || account.role === "admin") return;
+  if (!confirm(`Delete the account for ${account.name}? This removes its local pet records too.`)) return;
+  delete accounts[userId];
+  saveAccounts(accounts);
+  renderShell();
+  showToast("User account deleted");
+}
+
+function adminDeletePet(ownerId, petId) {
+  if (!isAdmin()) return;
+  const accounts = getAccounts();
+  const account = accounts[ownerId];
+  const p = account?.data?.pets?.find(x => x.id === petId);
+  if (!account || !p) return;
+  if (!confirm(`Delete ${p.name} from ${account.name}'s account?`)) return;
+  account.data.pets = account.data.pets.filter(x => x.id !== petId);
+  for (const key of ["health","schedules","incidents","weights","documents"]) {
+    account.data[key] = (account.data[key] || []).filter(x => x.petId !== petId);
+  }
+  accounts[ownerId] = account;
+  saveAccounts(accounts);
+  renderShell();
+  showToast(`${p.name} deleted`);
+}
+
+function adminHTML() {
+  if(!isAdmin()) return `${pageHead("Access denied","Admin access is required.")}<div class="empty">This account does not have administrator access.</div>`;
+  const accounts = getAccounts();
+  const users = Object.values(accounts).filter(a=>a.role!=="admin");
+  const allPets = users.flatMap(a=>(a.data?.pets||[]).map(p=>({...p,ownerName:a.name,ownerEmail:a.email,ownerId:a.id})));
+  const totalRecords = users.reduce((n,a)=>n+(a.data?.health||[]).length,0);
+  const totalIncidents = users.reduce((n,a)=>n+(a.data?.incidents||[]).length,0);
+  return `${pageHead("Admin panel","Overview of users and pets stored in this browser.","Refresh","admin-refresh")}
+    <div class="grid-4">
+      <div class="stat-card"><div class="stat-label">USERS</div><div class="stat-value">${users.length}</div><div class="stat-note">Local accounts</div></div>
+      <div class="stat-card"><div class="stat-label">PETS</div><div class="stat-value">${allPets.length}</div><div class="stat-note">Across local accounts</div></div>
+      <div class="stat-card"><div class="stat-label">HEALTH RECORDS</div><div class="stat-value">${totalRecords}</div><div class="stat-note">All users</div></div>
+      <div class="stat-card"><div class="stat-label">INCIDENTS</div><div class="stat-value">${totalIncidents}</div><div class="stat-note">All users</div></div>
+    </div>
+    <div class="grid-2" style="margin-top:15px">
+      <section class="panel">
+        <div class="panel-head"><h2>Users</h2></div>
+        ${users.length ? `<table class="table-like"><thead><tr><th>Name</th><th>Email</th><th>Pets</th><th>Records</th><th>Controls</th></tr></thead><tbody>${users.map(a=>`<tr><td><strong>${esc(a.name)}</strong></td><td>${esc(a.email)}</td><td>${(a.data?.pets||[]).length}</td><td>${(a.data?.health||[]).length}</td><td><div class="admin-actions"><button class="btn btn-light btn-sm" data-action="admin-reset-user" data-id="${esc(a.id)}">Reset</button><button class="btn btn-light btn-sm danger-btn" data-action="admin-delete-user" data-id="${esc(a.id)}">Delete</button></div></td></tr>`).join("")}</tbody></table>` : `<div class="empty">No user accounts have been created in this browser.</div>`}
+      </section>
+      <section class="panel">
+        <div class="panel-head"><h2>Pets</h2></div>
+        ${allPets.length ? `<table class="table-like"><thead><tr><th>Pet</th><th>Breed</th><th>Owner</th><th>Weight</th><th>Control</th></tr></thead><tbody>${allPets.map(p=>`<tr><td><strong>${esc(p.name)}</strong></td><td>${esc(p.breed||p.species||"—")}</td><td>${esc(p.ownerName)}</td><td>${p.weight||0} kg</td><td><button class="btn btn-light btn-sm danger-btn" data-action="admin-delete-pet" data-owner="${esc(p.ownerId)}" data-id="${esc(p.id)}">Delete pet</button></td></tr>`).join("")}</tbody></table>` : `<div class="empty">No pets have been added yet.</div>`}
+      </section>
+    </div>
+    <div class="panel" style="margin-top:15px"><p style="color:var(--muted);font-size:11px;margin:0"><strong>Prototype limitation:</strong> this admin panel can see accounts created in the same browser because this GitHub Pages version uses localStorage. It cannot see users from other devices or browsers. A real cross-user admin console requires a shared backend/database.</p></div>`;
+}
+
 function communityHTML() {
   const posts=state.community;
   return `<div class="community-hero"><span class="eyebrow" style="color:#b9d8cd">ANONYMIZED EXPERIENCES</span><h1>Learn from real pet experiences.</h1><p>Community posts are personal experiences, not diagnoses or veterinary advice. In this static version, publishing and search happen locally in your browser.</p><div class="search-box"><input id="community-search" placeholder="Search travel, vomiting, food, grooming..."><button class="btn btn-dark" style="background:#fff;color:var(--ink)" data-action="search-community">Search</button></div></div>
@@ -243,11 +485,18 @@ function filterCommunity(q) {
   document.getElementById("community-results").innerHTML=found.length?found.map(postCard).join(""):'<div class="empty">No matching experiences found.</div>';
 }
 function handleAction(action,data) {
-  if(action==="enter-app"||action==="demo-app") enterApp(true);
+  if(action==="enter-app") showAuth("login");
+  if(action==="demo-app") createDemoAccount();
   if(action==="open-menu") document.querySelector(".sidebar").classList.add("open");
   if(action==="close-menu") document.querySelector(".sidebar").classList.remove("open");
-  if(action==="reset-demo"){ if(confirm("Reset all local data to the demo?")){state=structuredClone(demo);save();currentPetId=state.pets[0].id;renderShell();showToast("Demo data restored");}}
+  if(action==="reset-demo"){ if(confirm("Reset this account to the demo data?")){state=structuredClone(demo);state.user.name=getAccounts()[sessionUserId]?.name||"Pet Owner";state.user.email=getAccounts()[sessionUserId]?.email||"";save();currentPetId=state.pets[0]?.id||null;renderShell();showToast("Current account data restored");}}
+  if(action==="logout") logout();
+  if(action==="demo-login") createDemoAccount();
+  if(action==="back-landing"){document.getElementById("auth").classList.add("hidden");document.getElementById("app").classList.add("hidden");document.getElementById("landing").classList.remove("hidden");}
+
   if(action==="add-pet") openPetModal();
+  if(action==="edit-pet") openPetModal(data.id);
+  if(action==="delete-pet") deletePet(data.id);
   if(action==="select-pet"){currentPetId=data.id;setView("dashboard");}
   if(action==="add-record") openRecordModal();
   if(action==="add-care") openCareModal();
@@ -260,6 +509,10 @@ function handleAction(action,data) {
   if(action==="upload-document") openDocumentModal();
   if(action==="open-ai") openAIModal();
   if(action==="show-notifications") showNotifications();
+  if(action==="admin-refresh" && isAdmin()){ renderShell(); showToast("Admin data refreshed"); }
+  if(action==="admin-reset-user" && isAdmin()) adminResetUser(data.id);
+  if(action==="admin-delete-user" && isAdmin()) adminDeleteUser(data.id);
+  if(action==="admin-delete-pet" && isAdmin()) adminDeletePet(data.owner, data.id);
 }
 function openModal(title,body) {
   const root=document.getElementById("modal-root");
@@ -268,24 +521,83 @@ function openModal(title,body) {
   root.querySelector(".modal-backdrop").onclick=e=>{if(e.target.classList.contains("modal-backdrop"))closeModal();};
 }
 function closeModal(){document.getElementById("modal-root").innerHTML="";}
-function openPetModal() {
-  openModal("Create a pet profile",`<form id="pet-form"><div class="form-grid">
-    <div class="form-group"><label>Name</label><input name="name" required></div>
-    <div class="form-group"><label>Species</label><select name="species"><option>Dog</option><option>Cat</option><option>Other</option></select></div>
-    <div class="form-group"><label>Breed</label><input name="breed"></div>
-    <div class="form-group"><label>Sex</label><select name="sex"><option>Unknown</option><option>Male</option><option>Female</option></select></div>
-    <div class="form-group"><label>Date of birth</label><input type="date" name="dob"></div>
-    <div class="form-group"><label>Weight (kg)</label><input type="number" step=".1" name="weight"></div>
-    <div class="form-group full"><label>About</label><textarea name="about"></textarea></div>
+function openPetModal(id=null) {
+  const old = id ? state.pets.find(x=>x.id===id) : null;
+  const title = old ? "Edit pet profile" : "Create a pet profile";
+  openModal(title,`<form id="pet-form"><div class="form-grid">
+    <div class="form-group"><label>Name</label><input name="name" value="${esc(old?.name||"")}" required></div>
+    <div class="form-group"><label>Species</label><select name="species">
+      <option ${old?.species==="Dog"||!old?"selected":""}>Dog</option><option ${old?.species==="Cat"?"selected":""}>Cat</option><option ${old?.species==="Other"?"selected":""}>Other</option>
+    </select></div>
+    <div class="form-group"><label>Breed</label><input name="breed" value="${esc(old?.breed||"")}"></div>
+    <div class="form-group"><label>Sex</label><select name="sex">
+      <option ${old?.sex==="Unknown"||!old?"selected":""}>Unknown</option><option ${old?.sex==="Male"?"selected":""}>Male</option><option ${old?.sex==="Female"?"selected":""}>Female</option>
+    </select></div>
+    <div class="form-group"><label>Date of birth</label><input type="date" name="dob" value="${old?.dob||""}"></div>
+    <div class="form-group"><label>Weight (kg)</label><input type="number" step=".1" name="weight" value="${old?.weight||""}"></div>
+    <div class="form-group"><label>Colour</label><input name="colour" value="${esc(old?.colour||"")}"></div>
+    <div class="form-group"><label>Microchip / ID</label><input name="microchip" value="${esc(old?.microchip||"")}"></div>
+    <div class="form-group full"><label>About</label><textarea name="about">${esc(old?.about||"")}</textarea></div>
     <div class="form-group full"><label>Photo</label><input type="file" name="photo" accept="image/*"></div>
-    </div><div class="modal-actions"><button type="button" class="btn btn-light" data-cancel>Cancel</button><button class="btn btn-dark">Create pet</button></div></form>`);
+    </div>
+    <div class="modal-actions"><button type="button" class="btn btn-light" data-cancel>Cancel</button><button class="btn btn-dark">${old?"Save changes":"Create pet"}</button></div></form>`);
   document.querySelector("[data-cancel]").onclick=closeModal;
   document.getElementById("pet-form").onsubmit=async e=>{
-    e.preventDefault(); const f=new FormData(e.target), photo=await fileData(f.get("photo"));
-    const p={id:uid("p"),name:f.get("name"),species:f.get("species"),breed:f.get("breed"),sex:f.get("sex"),dob:f.get("dob"),weight:Number(f.get("weight")||0),colour:"",about:f.get("about"),photo};
-    state.pets.push(p);currentPetId=p.id;save();closeModal();renderShell();showToast(`${p.name} added`);
+    e.preventDefault();
+    const f=new FormData(e.target);
+    let photo = old?.photo || "";
+    const selected = f.get("photo");
+    if (selected && selected.size) photo = await fileData(selected);
+
+    const obj={
+      id: old?.id || uid("p"),
+      name:f.get("name"),
+      species:f.get("species"),
+      breed:f.get("breed"),
+      sex:f.get("sex"),
+      dob:f.get("dob"),
+      weight:Number(f.get("weight")||0),
+      colour:f.get("colour")||"",
+      microchip:f.get("microchip")||"",
+      about:f.get("about")||"",
+      photo
+    };
+
+    if(old) {
+      Object.assign(old,obj);
+    } else {
+      state.pets.push(obj);
+      state.weights = state.weights || [];
+      if(obj.weight) state.weights.push({id:uid("w"),petId:obj.id,date:new Date().toISOString().slice(0,10),weight:obj.weight});
+      currentPetId=obj.id;
+    }
+    save();
+    closeModal();
+    renderShell();
+    showToast(old ? `${obj.name} updated` : `${obj.name} added`);
   };
 }
+
+function deletePet(id) {
+  const p = state.pets.find(x=>x.id===id);
+  if(!p) return;
+  if(state.pets.length===1) {
+    showToast("Keep at least one pet in the account");
+    return;
+  }
+  if(!confirm(`Delete ${p.name} and all records linked to this pet?`)) return;
+  state.pets = state.pets.filter(x=>x.id!==id);
+  state.health = state.health.filter(x=>x.petId!==id);
+  state.schedules = state.schedules.filter(x=>x.petId!==id);
+  state.incidents = state.incidents.filter(x=>x.petId!==id);
+  state.weights = state.weights.filter(x=>x.petId!==id);
+  state.documents = state.documents.filter(x=>x.petId!==id);
+  currentPetId = state.pets[0]?.id || null;
+  save();
+  renderShell();
+  showToast(`${p.name} deleted`);
+}
+
 function openRecordModal() {
   openModal("Add health record",`<form id="record-form"><div class="form-grid">
     <div class="form-group"><label>Type</label><select name="type"><option>Vaccination</option><option>Deworming</option><option>Flea/Tick</option><option>Medication</option><option>Vet visit</option><option>Allergy</option><option>Medical condition</option><option>Surgery</option><option>Grooming</option><option>Other</option></select></div>
@@ -339,10 +651,42 @@ function openIncidentModal(id=null) {
   };
 }
 function openWeightModal() {
-  openModal("Add weight measurement",`<form id="weight-form"><div class="form-grid"><div class="form-group"><label>Weight (kg)</label><input type="number" step=".1" min=".1" name="weight" value="${pet().weight||""}" required></div><div class="form-group"><label>Date</label><input type="date" name="date" value="${new Date().toISOString().slice(0,10)}"></div></div><div class="modal-actions"><button type="button" class="btn btn-light" data-cancel>Cancel</button><button class="btn btn-dark">Save measurement</button></div></form>`);
+  openModal("Add weight measurement",`<form id="weight-form">
+    <div class="form-grid">
+      <div class="form-group"><label>Weight (kg)</label><input type="number" step=".1" min=".1" name="weight" value="${pet().weight||""}" required></div>
+      <div class="form-group"><label>Date</label><input type="date" name="date" value="${new Date().toISOString().slice(0,10)}"></div>
+      <div class="form-group full"><label>Upload weight record / photo</label><input type="file" name="file" accept=".pdf,.png,.jpg,.jpeg,.webp"></div>
+      <div class="form-group full"><label>Notes</label><textarea name="notes" placeholder="Scale reading, vet record, reason for measurement..."></textarea></div>
+    </div>
+    <div class="modal-actions"><button type="button" class="btn btn-light" data-cancel>Cancel</button><button class="btn btn-dark">Save measurement</button></div>
+    <p style="color:var(--muted);font-size:10px;margin-top:12px">Small files are stored locally in this browser in the free version.</p>
+  </form>`);
   document.querySelector("[data-cancel]").onclick=closeModal;
-  document.getElementById("weight-form").onsubmit=e=>{e.preventDefault();const f=new FormData(e.target),w=Number(f.get("weight"));state.weights.push({id:uid("w"),petId:currentPetId,date:f.get("date"),weight:w});pet().weight=w;save();closeModal();renderShell();showToast("Weight recorded");};
+  document.getElementById("weight-form").onsubmit=async e=>{
+    e.preventDefault();
+    const f=new FormData(e.target);
+    const file=f.get("file");
+    if(file && file.size > 900000){ showToast("Keep the uploaded weight file under 900 KB"); return; }
+    const data=await fileData(file);
+    const entry={
+      id:uid("w"),
+      petId:currentPetId,
+      date:f.get("date"),
+      weight:Number(f.get("weight")),
+      notes:f.get("notes")||"",
+      fileName:file?.name||"",
+      fileType:file?.name ? file.name.split(".").pop().toUpperCase() : "",
+      fileData:data
+    };
+    state.weights.push(entry);
+    pet().weight=entry.weight;
+    save();
+    closeModal();
+    renderShell();
+    showToast("Weight record saved");
+  };
 }
+
 async function fileData(file) {
   if(!file || !file.size) return "";
   if(file.size > 1.5*1024*1024) { showToast("Photo is too large for local storage"); return ""; }
@@ -393,7 +737,147 @@ function openAIModal() {
   openModal("PetCare AI",`<div class="ai-chat"><div class="ai-messages" id="ai-messages"><div class="chat-bubble ai">Hi. I can search ${esc(pet().name)}'s stored records. Try: “When is the next deworming?”, “Show vaccination history”, “What incidents are recorded?”, or “How has weight changed?”</div></div><form class="ai-input" id="ai-form"><input id="ai-question" placeholder="Ask about your pet's records..." autocomplete="off"><button class="btn btn-dark">Send</button></form></div>`);
   document.getElementById("ai-form").onsubmit=e=>{e.preventDefault();const input=document.getElementById("ai-question"),q=input.value.trim();if(!q)return;const box=document.getElementById("ai-messages");box.innerHTML+=`<div class="chat-bubble user">${esc(q)}</div><div class="chat-bubble ai">${esc(aiAnswer(q))}</div>`;input.value="";box.scrollTop=box.scrollHeight;};
 }
-document.addEventListener("click",e=>{
-  const view=e.target.closest("[data-view]"); if(view && !view.closest(".side-nav")) { e.preventDefault(); setView(view.dataset.view); }
-});
-document.querySelectorAll("[data-action]").forEach(el=>el.addEventListener("click",()=>handleAction(el.dataset.action,el.dataset)));
+
+ensureAdminAccount();
+
+function initApp() {
+  // Authentication tabs and forms
+  document.querySelectorAll("[data-auth-tab]").forEach(tab => {
+    tab.addEventListener("click", () => switchAuthTab(tab.dataset.authTab));
+  });
+
+  const loginForm = document.getElementById("login-form");
+  const signupForm = document.getElementById("signup-form");
+
+  if (loginForm) {
+    loginForm.addEventListener("submit", async (e) => {
+      e.preventDefault();
+
+      const email = emailKey(document.getElementById("login-email").value);
+      const password = document.getElementById("login-password").value;
+      const error = document.getElementById("login-error");
+      error.textContent = "";
+
+      const accounts = getAccounts();
+      const account = Object.values(accounts).find(a => emailKey(a.email) === email);
+
+      if (!account) {
+        error.textContent = "No account found with this email.";
+        return;
+      }
+
+      const hash = await hashPassword(password);
+      const validPassword =
+        account.passwordHash === hash ||
+        account.passwordHash === password;
+
+      if (!validPassword) {
+        error.textContent = "Incorrect password.";
+        return;
+      }
+
+      if (account.passwordHash === password) {
+        account.passwordHash = hash;
+        accounts[account.id] = account;
+        saveAccounts(accounts);
+      }
+
+      document.getElementById("login-password").value = "";
+      startSession(account.id);
+      showToast("Welcome back");
+    });
+  }
+
+  if (signupForm) {
+    signupForm.addEventListener("submit", async (e) => {
+      e.preventDefault();
+
+      const name = document.getElementById("signup-name").value.trim();
+      const email = emailKey(document.getElementById("signup-email").value);
+      const password = document.getElementById("signup-password").value;
+      const confirm = document.getElementById("signup-confirm").value;
+      const error = document.getElementById("signup-error");
+      error.textContent = "";
+
+      if (!name) {
+        error.textContent = "Please enter your name.";
+        return;
+      }
+
+      if (password.length < 6) {
+        error.textContent = "Password must be at least 6 characters.";
+        return;
+      }
+
+      if (password !== confirm) {
+        error.textContent = "Passwords do not match.";
+        return;
+      }
+
+      const accounts = getAccounts();
+
+      if (Object.values(accounts).some(a => emailKey(a.email) === email)) {
+        error.textContent = "An account with this email already exists.";
+        return;
+      }
+
+      const id = uid("user");
+      const passwordHash = await hashPassword(password);
+
+      accounts[id] = {
+        id,
+        name,
+        email,
+        passwordHash,
+        role: "user",
+        data: {
+          user: { name, email },
+          pets: [],
+          health: [],
+          schedules: [],
+          incidents: [],
+          weights: [],
+          documents: [],
+          community: [],
+          notifications: []
+        }
+      };
+
+      saveAccounts(accounts);
+      startSession(id);
+      showToast("Account created");
+    });
+  }
+
+  // One event delegation layer handles buttons on the landing page,
+  // auth screen and dynamically rendered application views.
+  document.addEventListener("click", e => {
+    const actionEl = e.target.closest("[data-action]");
+    if (actionEl) {
+      e.preventDefault();
+      handleAction(actionEl.dataset.action, actionEl.dataset);
+      return;
+    }
+
+    const viewEl = e.target.closest("[data-view]");
+    if (viewEl) {
+      e.preventDefault();
+      setView(viewEl.dataset.view);
+    }
+  });
+
+  // Restore an existing session, otherwise show the original landing page.
+  if (sessionUserId && state) {
+    currentPetId = state.pets?.[0]?.id || null;
+    setView("dashboard");
+  } else {
+    sessionUserId = null;
+    state = null;
+    localStorage.removeItem(SESSION_KEY);
+    document.getElementById("landing").classList.remove("hidden");
+    document.getElementById("auth").classList.add("hidden");
+    document.getElementById("app").classList.add("hidden");
+  }
+}
+
+initApp();
