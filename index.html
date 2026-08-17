@@ -1,0 +1,143 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="theme-color" content="#163b35">
+  <meta name="description" content="PetCare Passport — a digital health passport for your pet.">
+  <title>PetCare Passport</title>
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <div id="toast-root" class="toast-root"></div>
+
+  <div id="landing" class="landing">
+    <nav class="landing-nav">
+      <a class="brand" href="#" data-view="home">
+        <span class="brand-mark">P</span>
+        <span>PetCare</span>
+      </a>
+      <div class="landing-links">
+        <a href="#features">Features</a>
+        <a href="#how-it-works">How it works</a>
+      </div>
+      <button class="btn btn-dark" data-action="enter-app">Open Passport</button>
+    </nav>
+
+    <main>
+      <section class="hero">
+        <div class="hero-copy">
+          <div class="eyebrow">A digital health passport for pets</div>
+          <h1>Every important moment of their life, <em>in one place.</em></h1>
+          <p class="hero-text">Keep vaccinations, deworming, vet visits, incidents, documents, weight and everyday care together. PetCare turns scattered pet records into a simple living timeline.</p>
+          <div class="hero-actions">
+            <button class="btn btn-dark btn-large" data-action="enter-app">Create your pet profile <span>→</span></button>
+            <button class="text-btn" data-action="demo-app">Explore demo <span>↓</span></button>
+          </div>
+          <div class="hero-proof">
+            <div class="avatar-stack"><span>G</span><span>M</span><span>R</span></div>
+            <span>Built for lifelong pet records</span>
+          </div>
+        </div>
+        <div class="hero-visual">
+          <div class="hero-card main-pet-card">
+            <div class="pet-photo pet-photo-large">
+              <div class="dog-illustration">
+                <span class="ear ear-left"></span><span class="ear ear-right"></span>
+                <span class="face"></span><span class="eye eye-left"></span><span class="eye eye-right"></span>
+                <span class="nose"></span><span class="mouth"></span>
+              </div>
+            </div>
+            <div class="hero-pet-info">
+              <div>
+                <span class="small-label">YOUR PET</span>
+                <h3>Goku</h3>
+                <p>German Shepherd × Husky</p>
+              </div>
+              <span class="status-pill">Healthy</span>
+            </div>
+            <div class="hero-stats">
+              <div><strong>28</strong><span>kg</span></div>
+              <div><strong>2</strong><span>years</span></div>
+              <div><strong>12</strong><span>records</span></div>
+            </div>
+          </div>
+          <div class="floating-reminder">
+            <span class="reminder-dot"></span>
+            <div><strong>Deworming due soon</strong><small>13 Nov · 88 days</small></div>
+          </div>
+        </div>
+      </section>
+
+      <section id="features" class="feature-section">
+        <div class="section-heading">
+          <span class="eyebrow">Everything together</span>
+          <h2>More than a reminder app.</h2>
+          <p>A complete place to preserve your pet's health history and make the next important thing impossible to forget.</p>
+        </div>
+        <div class="feature-grid">
+          <article class="feature-card"><span class="feature-icon">◷</span><h3>Care reminders</h3><p>Track vaccines, deworming, flea and tick treatment, grooming, medication and other recurring care.</p></article>
+          <article class="feature-card"><span class="feature-icon">⌁</span><h3>Life timeline</h3><p>See health records, incidents and weight changes as one chronological story.</p></article>
+          <article class="feature-card"><span class="feature-icon">＋</span><h3>Incident journal</h3><p>Record what happened, symptoms, actions, vet visits and outcomes for future reference.</p></article>
+          <article class="feature-card"><span class="feature-icon">▱</span><h3>Document vault</h3><p>Keep certificates, prescriptions, reports and other important files with the pet they belong to.</p></article>
+          <article class="feature-card"><span class="feature-icon">⌁</span><h3>Health analytics</h3><p>Track weight over time and understand the pet's care history at a glance.</p></article>
+          <article class="feature-card"><span class="feature-icon">◎</span><h3>Community ready</h3><p>Turn selected incidents into anonymized experiences that can help other pet owners.</p></article>
+        </div>
+      </section>
+
+      <section id="how-it-works" class="process-section">
+        <div class="process-copy">
+          <span class="eyebrow">Simple by design</span>
+          <h2>Record once. Remember automatically.</h2>
+        </div>
+        <div class="process-steps">
+          <div><span>01</span><h3>Create a pet</h3><p>Add basic information, photo and current weight.</p></div>
+          <div><span>02</span><h3>Build the record</h3><p>Add vaccinations, treatments, visits, incidents and documents.</p></div>
+          <div><span>03</span><h3>Stay ahead</h3><p>See upcoming care, overdue items and the complete timeline.</p></div>
+        </div>
+      </section>
+    </main>
+    <footer class="landing-footer"><span>PetCare Passport</span><span>Built as a free static web app.</span></footer>
+  </div>
+
+  <div id="app" class="app-shell hidden">
+    <aside class="sidebar">
+      <div class="sidebar-top">
+        <a class="brand" href="#" data-view="dashboard"><span class="brand-mark">P</span><span>PetCare</span></a>
+        <button class="icon-btn mobile-close" data-action="close-menu" aria-label="Close menu">×</button>
+      </div>
+      <div class="pet-switcher" id="pet-switcher"></div>
+      <nav class="side-nav">
+        <button class="nav-item active" data-view="dashboard"><span>⌂</span>Dashboard</button>
+        <button class="nav-item" data-view="pets"><span>◉</span>My pets</button>
+        <button class="nav-item" data-view="health"><span>＋</span>Health records</button>
+        <button class="nav-item" data-view="care"><span>◷</span>Care & reminders</button>
+        <button class="nav-item" data-view="incidents"><span>⌁</span>Incidents</button>
+        <button class="nav-item" data-view="timeline"><span>│</span>Timeline</button>
+        <button class="nav-item" data-view="documents"><span>▱</span>Documents</button>
+        <button class="nav-item" data-view="community"><span>◎</span>Community</button>
+      </nav>
+      <div class="sidebar-bottom">
+        <button class="nav-item" data-action="open-ai"><span>✦</span>PetCare AI</button>
+        <button class="nav-item muted" data-action="reset-demo"><span>↺</span>Reset demo data</button>
+      </div>
+    </aside>
+
+    <div class="app-main">
+      <header class="app-header">
+        <button class="icon-btn menu-btn" data-action="open-menu">☰</button>
+        <div class="header-title" id="header-title">Dashboard</div>
+        <div class="header-actions">
+          <button class="notification-btn" data-action="show-notifications" aria-label="Notifications"><span>♢</span><i id="notification-count">0</i></button>
+          <div class="user-chip"><span class="user-avatar">D</span><span>Deekshitha</span></div>
+        </div>
+      </header>
+      <main id="view-root" class="view-root"></main>
+    </div>
+  </div>
+
+  <div id="modal-root"></div>
+
+  <script src="app.js"></script>
+</body>
+</html>
